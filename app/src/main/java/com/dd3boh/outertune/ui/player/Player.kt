@@ -129,7 +129,6 @@ import com.dd3boh.outertune.ui.component.AsyncImageLocal
 import com.dd3boh.outertune.ui.component.BottomSheet
 import com.dd3boh.outertune.ui.component.BottomSheetState
 import com.dd3boh.outertune.ui.component.LocalMenuState
-import com.dd3boh.outertune.ui.component.PlayerSliderTrack
 import com.dd3boh.outertune.ui.component.ResizableIconButton
 import com.dd3boh.outertune.ui.component.rememberBottomSheetState
 import com.dd3boh.outertune.ui.menu.PlayerMenu
@@ -144,6 +143,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.saket.squiggles.SquigglySlider
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -441,7 +441,7 @@ fun BottomSheetPlayer(
                 }
             }
 
-            Slider(
+            SquigglySlider(
                 value = (sliderPosition ?: position).toFloat(),
                 valueRange = 0f..(if (duration == C.TIME_UNSET) 0f else duration.toFloat()),
                 onValueChange = {
@@ -457,14 +457,10 @@ fun BottomSheetPlayer(
                     sliderPosition = null
                     haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                 },
-                thumb = { Spacer(modifier = Modifier.size(0.dp)) },
-                track = { sliderState ->
-                    PlayerSliderTrack(
-                        sliderState = sliderState,
-                        colors = SliderDefaults.colors()
-                    )
-                },
-                modifier = Modifier.padding(horizontal = PlayerHorizontalPadding)
+                modifier = Modifier.padding(horizontal = PlayerHorizontalPadding),
+                squigglesSpec = SquigglySlider.SquigglesSpec(
+                    amplitude = if (isPlaying) (2.dp).coerceAtLeast(2.dp) else 0.dp
+                ),
             )
 
             Row(
