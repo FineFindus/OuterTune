@@ -8,6 +8,8 @@ import com.dd3boh.outertune.constants.PlaylistSortType
 import com.dd3boh.outertune.db.MusicDatabase
 import com.dd3boh.outertune.db.entities.Album
 import com.dd3boh.outertune.db.entities.LocalItem
+import com.dd3boh.outertune.db.entities.Playlist
+import com.dd3boh.outertune.db.entities.RecentActivityItem
 import com.dd3boh.outertune.db.entities.Song
 import com.dd3boh.outertune.models.SimilarRecommendation
 import com.dd3boh.outertune.utils.SyncUtils
@@ -47,9 +49,9 @@ class HomeViewModel @Inject constructor(
     val selectedChip = MutableStateFlow<HomePage.Chip?>(null)
     private val previousHomePage = MutableStateFlow<HomePage?>(null)
     val explorePage = MutableStateFlow<ExplorePage?>(null)
-    val playlists = database.playlists(PlaylistFilter.LIBRARY, PlaylistSortType.NAME, true)
+    val playlists = MutableStateFlow<List<Playlist>>(emptyList())
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
-    val recentActivity = database.recentActivity()
+    val recentActivity = MutableStateFlow<List<RecentActivityItem>>(emptyList())
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     val allLocalItems = MutableStateFlow<List<LocalItem>>(emptyList())
@@ -58,72 +60,78 @@ class HomeViewModel @Inject constructor(
     private suspend fun load() {
         isLoading.value = true
 
-        quickPicks.value = database.quickPicks()
-            .first().shuffled().take(20)
+        if (!YouTube.useLoginForBrowse) {
+            quickPicks.value = database.quickPicks()
+                .first().shuffled().take(20)
 
-        forgottenFavorites.value = database.forgottenFavorites()
-            .first().shuffled().take(20)
+            forgottenFavorites.value = database.forgottenFavorites()
+                .first().shuffled().take(20)
 
-        val fromTimeStamp = System.currentTimeMillis() - 86400000 * 7 * 2
-        val keepListeningSongs = database.mostPlayedSongs(fromTimeStamp, limit = 15, offset = 5)
-            .first().shuffled().take(10)
-        val keepListeningAlbums = database.mostPlayedAlbums(fromTimeStamp, limit = 8, offset = 2)
-            .first().filter { it.album.thumbnailUrl != null }.shuffled().take(5)
-        val keepListeningArtists = database.mostPlayedArtists(fromTimeStamp)
-            .first().filter { it.artist.isYouTubeArtist && it.artist.thumbnailUrl != null }.shuffled().take(5)
-        keepListening.value = (keepListeningSongs + keepListeningAlbums + keepListeningArtists).shuffled()
+            val fromTimeStamp = System.currentTimeMillis() - 86400000 * 7 * 2
+            val keepListeningSongs = database.mostPlayedSongs(fromTimeStamp, limit = 15, offset = 5)
+                .first().shuffled().take(10)
+            val keepListeningAlbums =
+                database.mostPlayedAlbums(fromTimeStamp, limit = 8, offset = 2)
+                    .first().filter { it.album.thumbnailUrl != null }.shuffled().take(5)
+            val keepListeningArtists = database.mostPlayedArtists(fromTimeStamp)
+                .first().filter { it.artist.isYouTubeArtist && it.artist.thumbnailUrl != null }
+                .shuffled().take(5)
+            keepListening.value =
+                (keepListeningSongs + keepListeningAlbums + keepListeningArtists).shuffled()
 
-        allLocalItems.value =
-            (quickPicks.value.orEmpty() + forgottenFavorites.value.orEmpty() + keepListening.value.orEmpty())
-                .filter { it is Song || it is Album }
+            allLocalItems.value =
+                (quickPicks.value.orEmpty() + forgottenFavorites.value.orEmpty() + keepListening.value.orEmpty())
+                    .filter { it is Song || it is Album }
 
-        if (YouTube.cookie != null) { // if logged in
-            // InnerTune way is YouTube.likedPlaylists().onSuccess { ... }
-            // OuterTune uses YouTube.library("FEmusic_liked_playlists").completedL().onSuccess { ... }
-            YouTube.library("FEmusic_liked_playlists").completed().onSuccess {
-                accountPlaylists.value = it.items.filterIsInstance<PlaylistItem>()
-            }.onFailure {
-                reportException(it)
+            if (YouTube.cookie != null) { // if logged in
+                // InnerTune way is YouTube.likedPlaylists().onSuccess { ... }
+                // OuterTune uses YouTube.library("FEmusic_liked_playlists").completedL().onSuccess { ... }
+                YouTube.library("FEmusic_liked_playlists").completed().onSuccess {
+                    accountPlaylists.value = it.items.filterIsInstance<PlaylistItem>()
+                }.onFailure {
+                    reportException(it)
+                }
             }
-        }
 
-        // Similar to artists
-        val artistRecommendations =
-            database.mostPlayedArtists(fromTimeStamp, limit = 10).first()
-                .filter { it.artist.isYouTubeArtist }
-                .shuffled().take(3)
-                .mapNotNull {
-                    val items = mutableListOf<YTItem>()
-                    YouTube.artist(it.id).onSuccess { page ->
-                        items += page.sections.getOrNull(page.sections.size - 2)?.items.orEmpty()
-                        items += page.sections.lastOrNull()?.items.orEmpty()
+            // Similar to artists
+            val artistRecommendations =
+                database.mostPlayedArtists(fromTimeStamp, limit = 10).first()
+                    .filter { it.artist.isYouTubeArtist }
+                    .shuffled().take(3)
+                    .mapNotNull {
+                        val items = mutableListOf<YTItem>()
+                        YouTube.artist(it.id).onSuccess { page ->
+                            items += page.sections.getOrNull(page.sections.size - 2)?.items.orEmpty()
+                            items += page.sections.lastOrNull()?.items.orEmpty()
+                        }
+                        SimilarRecommendation(
+                            title = it,
+                            items = items
+                                .shuffled()
+                                .ifEmpty { return@mapNotNull null }
+                        )
                     }
-                    SimilarRecommendation(
-                        title = it,
-                        items = items
-                            .shuffled()
-                            .ifEmpty { return@mapNotNull null }
-                    )
-                }
-        // Similar to songs
-        val songRecommendations =
-            database.mostPlayedSongs(fromTimeStamp, limit = 10).first()
-                .filter { it.album != null }
-                .shuffled().take(2)
-                .mapNotNull { song ->
-                    val endpoint = YouTube.next(WatchEndpoint(videoId = song.id)).getOrNull()?.relatedEndpoint ?: return@mapNotNull null
-                    val page = YouTube.related(endpoint).getOrNull() ?: return@mapNotNull null
-                    SimilarRecommendation(
-                        title = song,
-                        items = (page.songs.shuffled().take(8) +
-                                page.albums.shuffled().take(4) +
-                                page.artists.shuffled().take(4) +
-                                page.playlists.shuffled().take(4))
-                            .shuffled()
-                            .ifEmpty { return@mapNotNull null }
-                    )
-                }
-        similarRecommendations.value = (artistRecommendations + songRecommendations).shuffled()
+            // Similar to songs
+            val songRecommendations =
+                database.mostPlayedSongs(fromTimeStamp, limit = 10).first()
+                    .filter { it.album != null }
+                    .shuffled().take(2)
+                    .mapNotNull { song ->
+                        val endpoint = YouTube.next(WatchEndpoint(videoId = song.id))
+                            .getOrNull()?.relatedEndpoint ?: return@mapNotNull null
+                        val page = YouTube.related(endpoint).getOrNull() ?: return@mapNotNull null
+                        SimilarRecommendation(
+                            title = song,
+                            items = (page.songs.shuffled().take(8) +
+                                    page.albums.shuffled().take(4) +
+                                    page.artists.shuffled().take(4) +
+                                    page.playlists.shuffled().take(4))
+                                .shuffled()
+                                .ifEmpty { return@mapNotNull null }
+                        )
+                    }
+            similarRecommendations.value = (artistRecommendations + songRecommendations).shuffled()
+        }
 
         YouTube.home().onSuccess { page ->
             homePage.value = page
