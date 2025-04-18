@@ -3,13 +3,11 @@ package com.dd3boh.outertune.viewmodels
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.dd3boh.outertune.constants.PlaylistFilter
-import com.dd3boh.outertune.constants.PlaylistSortType
 import com.dd3boh.outertune.db.MusicDatabase
 import com.dd3boh.outertune.db.entities.Album
 import com.dd3boh.outertune.db.entities.LocalItem
 import com.dd3boh.outertune.db.entities.Playlist
-import com.dd3boh.outertune.db.entities.RecentActivityItem
+import com.dd3boh.outertune.db.entities.RecentActivityEntity
 import com.dd3boh.outertune.db.entities.Song
 import com.dd3boh.outertune.models.SimilarRecommendation
 import com.dd3boh.outertune.utils.SyncUtils
@@ -51,7 +49,7 @@ class HomeViewModel @Inject constructor(
     val explorePage = MutableStateFlow<ExplorePage?>(null)
     val playlists = MutableStateFlow<List<Playlist>>(emptyList())
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
-    val recentActivity = MutableStateFlow<List<RecentActivityItem>>(emptyList())
+    val recentActivity = MutableStateFlow<List<RecentActivityEntity>>(emptyList())
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     val allLocalItems = MutableStateFlow<List<LocalItem>>(emptyList())
@@ -184,7 +182,7 @@ class HomeViewModel @Inject constructor(
             previousHomePage.value = homePage.value
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val nextSections = YouTube.home(params = chip?.endpoint?.params).getOrNull() ?: return@launch
+            val nextSections = YouTube.home(params = chip.endpoint?.params).getOrNull() ?: return@launch
             homePage.value = nextSections.copy(
                 chips = homePage.value?.chips,
                 sections = nextSections.sections,
